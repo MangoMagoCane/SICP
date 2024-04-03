@@ -21,7 +21,7 @@
         ((= kinds-of-coins 5) 50)))
 
 ; NOTUSEFUL
-; (count-change 11)
+(count-change 11)
 ; (+ (cc 11 4)
 ;    (cc -39 5))
 ; (+ (+ (cc 11 3)
