@@ -12,4 +12,5 @@
               coefficient-sequence))
 
 (horner-eval 2 (list 1 3 0 5 0 1)) ; 79
-(horner-eval 3 (list 5 1)) ; 79
+(horner-eval 3 (list 5 1)) ; 8
+(horner-eval 2 (list 1 3 0 5)) ; 47
