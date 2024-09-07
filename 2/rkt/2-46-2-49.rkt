@@ -25,15 +25,16 @@
   (make-vect (* s (xcor-vect vect))
              (* s (ycor-vect vect))))
 
-; (define vec1 (make-vect 1 2))
-; (define vec2 (make-vect 3 4))
+(define vec1 (make-vect 1 2))
+(define vec2 (make-vect 3 4))
 
-; (add-vect vec1 vec2)
-; (sub-vect vec1 vec2)
-; (scale-vect vec1 5)
+(add-vect vec1 vec2)
+(sub-vect vec1 vec2)
+(scale-vect vec1 5)
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ; 2-47
+
 (define (make-frame origin edge1 edge2)
   (list origin edge1 edge2))
 
@@ -46,10 +47,10 @@
 (define (edge2-frame frame)
   (caddr frame))
 
-; (define frame-1 (make-frame 1 2 3))
-; (origin-frame frame-1)
-; (edge1-frame frame-1)
-; (edge2-frame frame-1)
+(define frame-1 (make-frame 1 2 3))
+(origin-frame frame-1)
+(edge1-frame frame-1)
+(edge2-frame frame-1)
 
 ;_____________________________________________________________________________________________________
 
@@ -66,12 +67,13 @@
   (cddr frame))
 
 (define frame2 (make-frame-2 1 2 3))
-; (origin-frame-2 frame2)
-; (edge1-frame-2 frame2)
-; (edge2-frame-2 frame2)
+(origin-frame-2 frame2)
+(edge1-frame-2 frame2)
+(edge2-frame-2 frame2)
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ; 2-48
+
 (define draw-line "no implementation")
 (define (frame-coord-map frame)
   (lambda (v)
