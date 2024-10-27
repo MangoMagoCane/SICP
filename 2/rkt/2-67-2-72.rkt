@@ -5,7 +5,7 @@
   (display " test: ")
   (if value 
       (display "Success!")
-      ((display "Failure")))
+      (display "Failure"))
   (newline))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
