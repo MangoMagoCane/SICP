@@ -53,10 +53,19 @@
 ; the case of insufficient funds (which are assumed to not be the case)
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;; 
-; 3-44
+; 3-45
 
 ; Louis's reasoning is incorrect, since exchange is serialized
 ; to two accounts, the subsequent serialized calls to withdraw/deposit
 ; from exchange to the accounts will not process until exchange has completed 
 ; causing an infinite loops since the values exchange depends on for completion
 ; will only complete once complete has
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;; 
+; 3-46
+
+; test-and-set! can fail if implemented as a regular procedure
+; if process a and b both make calls to (mutex 'acquire) in parrallel
+; both observing that (car cell) equals false before either process 
+; could set it to true, thus both processes acquire the mutex
+
