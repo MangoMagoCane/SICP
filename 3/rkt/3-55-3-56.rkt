@@ -1,5 +1,7 @@
 #lang sicp
 
+(define (square x) (* x x))
+
 (define (stream-car stream) (car stream))
 (define (stream-cdr stream) (force (cdr stream)))
 
@@ -19,6 +21,23 @@
         (apply proc (map stream-car argstreams))
         (apply stream-map
                (cons proc (map stream-cdr argstreams))))))
+
+(define (stream-filter pred stream)
+  (cond ((stream-null? stream) the-empty-stream)
+        ((pred (stream-car stream))
+          (cons-stream (stream-car stream)
+                       (stream-filter
+                         pred
+                         (stream-cdr stream))))
+        (else (stream-filter pred (stream-cdr stream)))))
+
+(define (stream-for-each proc s)
+  (if (stream-null? s)
+      'done
+      (begin (proc (stream-car s))
+             (set! val (+ val 1))
+             (display val) (newline)
+             (stream-for-each proc (stream-cdr s)))))
 
 (define (add-streams s1 s2) (stream-map + s1 s2))
 (define (scale-stream stream factor)
