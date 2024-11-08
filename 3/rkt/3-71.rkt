@@ -1,20 +1,19 @@
 #lang sicp
 
-; a
-(weighted-pairs integers integers
-                (lambda (x) (+ (car x) (cadr x)))
-; b
-(define ints-235 
-  (stream-filter (lambda (x) 
-    (not (or (divisible? x 2)
-             (divisible? x 3)
-             (divisible? x 5))))
-    integers))
+(define (sum-triple x)
+  (+ (expt (car x) 3)
+     (expt (cadr x) 3)))
 
-(weighted-pairs ints-235 ints-235 
-(lambda (x) 
-  (let ((i (car x))
-        (j (cadr x)))
-    (+ (* 2 i) 
-        (* 3 j)
-        (* 5 i j))))
+(define (raman-filter stream)
+  (cond ((stream-null? stream) the-empty-stream)
+        ((= (sum-triple (stream-car stream))
+            (sum-triple (stream-car (stream-cdr stream))))
+          (cons-stream (append (stream-car stream) (stream-car (stream-cdr stream)))
+                       (raman-filter (stream-cdr stream))))
+        (else (raman-filter (stream-cdr stream)))))
+
+(define ramanujan-numbers
+  (raman-filter
+    (weighted-pairs integers integers sum-triple)))
+
+(stream-ref ramanujan-numbers 5)
