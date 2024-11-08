@@ -11,14 +11,24 @@
               (cond ((< s1weight s2weight)
                       (cons-stream
                         s1pair
-                        (merge (stream-cdr s1) s2)))
+                        (merge-weighted (stream-cdr s1) s2 weight)))
                     ((> s1weight s2weight)
                       (cons-stream
-                        s2pir
-                        (merge s1 (stream-cdr s2))))
+                        s2pair
+                        (merge-weighted s1 (stream-cdr s2) weight)))
                     (else 
                       (cons-stream
                         s1pair 
                         (cons-stream
                           s2pair
-                          (merge (stream-cdr s1) (stream-cdr s2)))))))))))
+                          (merge-weighted (stream-cdr s1) (stream-cdr s2) weight))))))))))
+ 
+(define (weighted-pairs s t proc)
+  (cons-stream
+    (list (stream-car s) (stream-car t))
+    (merge-weighted
+      (stream-map (lambda (x) (list (stream-car s) x))
+                  (stream-cdr t))
+      (weighted-pairs (stream-cdr s) (stream-cdr t) proc)
+      proc)))
+
