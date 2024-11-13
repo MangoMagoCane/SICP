@@ -1,7 +1,7 @@
 #lang sicp
 
 (define (make-application procedure parameters)
-  (list procedure parameters))
+  (cons procedure parameters))
 (define (cond-arrow-action clause) (caddr clause))
 
 (define (cond-arrow-clause? clause)

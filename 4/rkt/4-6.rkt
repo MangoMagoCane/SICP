@@ -17,7 +17,8 @@
           (make-application
             (make-lambda (reverse (cons (let-var first) vars))
                          (let-body exp))
-            (reverse (cons (cadr first) exps)))
+            (list (reverse (cons (let-exp first) exps))))
           (expand-clauses rest 
-                          (cons (let-var first) vars) (cons (let-exp first) exps)))))
+                          (cons (let-var first) vars) 
+                          (cons (let-exp first) exps)))))
   (expand-clauses (let-clauses exp) '() '()))
