@@ -1,22 +1,22 @@
 #lang sicp
 
 (define (lookup-variable-value var env)
-  (env-loop (first-frame env) (lambda () (car vals)) env))
+  (env-loop (first-frame env) (lambda (vals) (car vals)) env))
 
 (define (set-variable-value! var val env)
-  (env-loop (lambda () (set-car! vals val)) env))
+  (env-loop (lambda (vals) (set-car! vals val)) env))
 
 (define (define-variable! var val env)
   (let ((frame (first-frame env)))
     (scan (frame-variables frame)
           (frame-values frame)
           (lambda () (add-binding-to-frame! var val frame))
-          (lambda () (set-car! vals val))
+          (lambda (vals) (set-car! vals val))
 
 (define (scan vars vals null-cond eq-cond)
   (define (inner vars vals)
     (cond ((null? vars)
-            (null-cond)
+            (null-cond vals)
           ((eq? var (car vars)) (eq-cond))
           (else (inner (cdr vars) (cdr vals))))))
   (inner vars vals))
