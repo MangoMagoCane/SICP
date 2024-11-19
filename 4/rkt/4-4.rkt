@@ -5,7 +5,7 @@
 
 (define (eval-and exps env)
   (define (inner exps)
-    (let (curr-eval (eval (first-exp exps) env))
+    (let ((curr-eval (eval (first-exp exps) env)))
       (if curr-eval
           (if (last-exp? exps)
               curr-eval
@@ -15,7 +15,7 @@
 
 (define (eval-or exps env)
   (define (inner exps)
-    (let (curr-eval (eval (first-exp exps) env))
+    (let ((curr-eval (eval (first-exp exps) env)))
       (if curr-eval
           curr-eval
           (if (last-exp? exps)

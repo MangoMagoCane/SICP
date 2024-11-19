@@ -1,30 +1,32 @@
 #lang sicp
 
 (define (lookup-variable-value var env)
-  (env-loop car (lambda (_1 vals) (car vals)) env))
+  (env-loop var car (lambda (_1 vals) (car vals)) env))
 
 (define (set-variable-value! var val env)
-  (env-loop car (lambda (_1 vals) (set-car! vals val)) env))
+  (env-loop var car (lambda (_1 vals) (set-car! vals val)) env))
 
 (define (define-variable! var val env)
   (let ((frame (first-frame env)))
-    (scan (lambda (_1 vals) (add-binding-to-frame! var val frame))
+    (scan var
+          (lambda (_1 vals) (add-binding-to-frame! var val frame))
           car
           (lambda (_1 vals) (set-car! vals val))
           frame)))
 
-(define (scan null-proc eq-cond eq-proc frame)
+(define (scan var null-proc eq-cond eq-proc frame)
   (define (inner vars vals)
-    (cond ((null? vars) (null-proc vals)
+    (cond ((null? vars) (null-proc vals))
           ((eq? var (eq-cond vars)) (eq-proc vars vals))
-          (else (inner (cdr vars) (cdr vals))))))
-  (inner (frame-variables frame) (frame-values vals)))
+          (else (inner (cdr vars) (cdr vals)))))
+  (inner (frame-variables frame) (frame-values frame)))
 
-(define (env-loop eq-cond eq-proc env)
+(define (env-loop var eq-cond eq-proc env)
   (define (inner env)
     (if (eq? env the-empty-environment)
         (error "Unbound variable: SET!" var)
-        (scan (lambda (_1 _2) (inner (enclosing-environment env)))
+        (scan var
+              (lambda (_1 _2) (inner (enclosing-environment env)))
               eq-cond
               eq-proc
               (first-frame env))))
@@ -46,7 +48,7 @@
 
 (define (make-unbound-deep! var env)
   (define (inner env)
-    (cond ((make-unbound! var ebv) #t)
+    (cond ((make-unbound! var env) #t)
           ((eq? env the-empty-environment) #f)
           (else (inner var (enclosing-environment env)))))
   (inner env))
