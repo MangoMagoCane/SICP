@@ -1,17 +1,17 @@
 #lang sicp
 
 (define (lookup-variable-value var env)
-  (env-loop var car (lambda (_1 vals) (car vals)) env))
+  (env-loop var car (lambda (_ vals) (car vals)) env))
 
 (define (set-variable-value! var val env)
-  (env-loop var car (lambda (_1 vals) (set-car! vals val)) env))
+  (env-loop var car (lambda (_ vals) (set-car! vals val)) env))
 
 (define (define-variable! var val env)
   (let ((frame (first-frame env)))
     (scan var
-          (lambda (_1 vals) (add-binding-to-frame! var val frame))
+          (lambda (vals) (add-binding-to-frame! var val frame))
           car
-          (lambda (_1 vals) (set-car! vals val))
+          (lambda (_ vals) (set-car! vals val))
           frame)))
 
 (define (scan var null-proc eq-cond eq-proc frame)
@@ -26,7 +26,7 @@
     (if (eq? env the-empty-environment)
         (error "Unbound variable: SET!" var)
         (scan var
-              (lambda (_1 _2) (inner (enclosing-environment env)))
+              (lambda (_) (inner (enclosing-environment env)))
               eq-cond
               eq-proc
               (first-frame env))))
@@ -40,7 +40,7 @@
           (begin (set-car! frame (cdr vars))
                  (set-cdr! frame (cdr vars)))
           (scan cadr
-                (lambda (_1) #f)
+                (lambda (_) #f)
                 (lambda (vars vals)
                   (set-cdr! vars (cddr vars))
                   (set-cdr! vals (cddr vals)))
