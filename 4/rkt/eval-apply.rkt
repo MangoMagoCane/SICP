@@ -1,6 +1,19 @@
 #lang sicp
 
-(define apply-in-underlying-scheme apply)
+(define (filter predicate sequence)
+  (cond ((null? sequence) nil)
+        ((predicate (car sequence))
+          (cons (car sequence)
+                (filter predicate (cdr sequence))))
+        (else (filter predicate (cdr sequence)))))
+(define (print . exps)
+  (for-each (lambda (exp) (display exp) (display " "))
+            exps)
+  (newline))
+(define (apply-n op val n)
+  (if (= n 0)
+      val
+      (apply-n op (op val) (- n 1))))
 
 (define (eval exp env)
   (cond ((self-evaluating? exp) exp)
@@ -17,13 +30,27 @@
         ((begin? exp)
           (eval-sequence (begin-actions exp) env))
         ((cond? exp) (eval (cond->if exp) env))
+        ((let? exp) (eval (let->combination exp) env))
+        ((let*? exp) (eval (let*->combination exp) env))
+        ((for? exp) (eval (for->combination exp) env))
         ((application? exp)
-          (apply-int (eval (operator exp) env)
-                 (list-of-values (operands exp) env)))
+          (meta-apply (eval (operator exp) env)
+                      (list-of-values (operands exp) env)))
         (else
           (error "Unknown expression type: EVAL" exp))))
 
-(define (apply-int procedure arguments)
+(define (foo args params)
+  (if (null? args)
+      '()
+      (let ((new-params
+              (if (null? params)
+                  params
+                  (cdr params))))
+        (if (variable-args? params)
+            (list (cons (car args) (foo (cdr args) new-params)))
+            (cons (car args) (foo (cdr args) new-params))))))
+
+(define (meta-apply procedure arguments)
   (cond ((primitive-procedure? procedure)
           (apply-primitive-procedure procedure arguments))
         ((compound-procedure? procedure)
@@ -31,24 +58,25 @@
             (procedure-body procedure)
             (extend-environment
               (procedure-parameters procedure)
-              arguments
+              (foo arguments (procedure-parameters-var-args procedure))
               (procedure-environment procedure))))
         (else
           (error
             "Unknown procedure type: APPLY" procedure))))
 
+(define (variable-args? exp) (tagged-list? exp ':))
+
 (define (list-of-values exps env)
   (if (no-operands? exps)
       '()
       (cons (eval (first-operand exps) env)
-      (list-of-values (rest-operands exps) env))))
+            (list-of-values (rest-operands exps) env))))
 
 (define (eval-if exp env)
   (if (true? (eval (if-predicate exp) env))
       (eval (if-consequent exp) env)
       (eval (if-alternative exp) env)))
 (define (eval-sequence exps env)
-  #| (display "help ") (display (cdr exps)) (newline) |#
   (if (last-exp? exps)
       (eval (first-exp exps) env)
       (begin
@@ -82,6 +110,8 @@
 (define (assignment-variable exp) (cadr exp))
 (define (assignment-value exp) (caddr exp))
 (define (definition? exp) (tagged-list? exp 'define))
+(define (make-definition definition body)
+  (list 'define definition body))
 (define (definition-variable exp)
   (if (symbol? (cadr exp))
       (cadr exp)
@@ -117,6 +147,7 @@
         ((last-exp? seq) (first-exp seq))
         (else (make-begin seq))))
 (define (make-begin seq) (cons 'begin seq))
+
 (define (application? exp) (pair? exp))
 (define (operator exp) (car exp))
 (define (operands exp) (cdr exp))
@@ -130,6 +161,12 @@
   (eq? (cond-predicate clause) 'else))
 (define (cond-predicate clause) (car clause))
 (define (cond-actions clause) (cdr clause))
+(define (make-application procedure parameters)
+  (cons procedure parameters))
+(define (cond-arrow-action clause) (caddr clause))
+(define (cond-arrow-clause? clause)
+  (tagged-list? (cond-actions clause) '=>))
+
 (define (cond->if exp)
   (define (expand-clauses clauses)
     (if (null? clauses)
@@ -141,13 +178,75 @@
                   (sequence->exp (cond-actions first))
                   (error "ELSE clause isn't last: COND->IF"
                         clauses))
-              (make-if (cond-predicate first)
-                       (sequence->exp (cond-actions first))
-                       (expand-clauses rest))))))
+              (if (cond-arrow-clause? first)
+                  (make-application
+                    (make-lambda '(_RESERVED_COND)
+                                (make-if '_RESERVED-COND
+                                          (make-application (cond-arrow-action first)
+                                                            '(_RESERVED-COND))
+                                          (expand-clauses rest)))
+                    (cond-predicate first))
+                  (make-if (cond-predicate first)
+                          (sequence->exp (cond-actions first))
+                          (expand-clauses rest)))))))
   (expand-clauses (cond-clauses exp)))
+
+(define (make-let clauses body)
+  (list 'let clauses body))
+(define (make-named-let var bindings body)
+  (list 'let var bindings body))
+(define (let? exp) (tagged-list? exp 'let))
+(define (named-let? exp) (not (pair? (named-let-var exp))))
+(define (let-clauses exp) (cadr exp))
+(define (let-body exp) (caddr exp))
+(define (let-var clause) (car clause))
+(define (let-exp clause) (cadr clause))
+(define (named-let-var exp) (cadr exp))
+(define (named-let-bindings exp) (caddr exp))
+(define (named-let-body exp) (cadddr exp))
+
+(define (let->combination exp)
+  (define (expand-clauses clauses vars exps)
+    (let ((first (car clauses))
+          (rest (cdr clauses)))
+      (if (null? rest)
+          (make-application
+            (make-lambda (reverse (cons (let-var first) vars))
+                         (list (let-body exp)))
+            (reverse (cons (let-exp first) exps)))
+          (expand-clauses rest
+                          (cons (let-var first) vars)
+                          (cons (let-exp first) exps)))))
+  (define (expand-named-let exp)
+    (let ((var (named-let-var exp))
+          (bindings (named-let-bindings exp)))
+      (make-let
+        (list (list var (make-lambda
+                          (map let-var bindings)
+                          (list (named-let-body exp)))))
+        (make-application var (map let-exp bindings)))))
+  (if (named-let? exp)
+      (expand-named-let exp)
+      (expand-clauses (let-clauses exp) '() '())))
+
+(define (make-let* clauses body)
+  (list 'let* clauses body))
+(define (let*? exp) (tagged-list? exp 'let*))
+(define (let*-clauses exp) (cadr exp))
+(define (let*-body exp) (caddr exp))
+
+(define (let*->combination exp)
+  (define (expand-clauses clauses)
+    (let ((first (car clauses))
+          (rest (cdr clauses)))
+      (if (null? rest)
+          (make-let (list first) (let*-body exp))
+          (make-let (list first) (expand-clauses rest)))))
+  (expand-clauses (let*-clauses exp)))
 
 (define (and? exp) (tagged-list? exp 'and))
 (define (or? exp) (tagged-list? exp 'or))
+
 (define (eval-and exps env)
   (define (inner exps)
     (let ((curr-eval (eval (first-exp exps) env)))
@@ -157,6 +256,7 @@
               (eval-and (rest-exps exps) env))
           'false)))
   (inner (rest-exps exps)))
+
 (define (eval-or exps env)
   (define (inner exps)
     (let ((curr-eval (eval (first-exp exps) env)))
@@ -167,6 +267,26 @@
               (eval-or (rest-exps exps) env)))))
   (inner (rest-exps exps)))
 
+(define (for? exp) (tagged-list? exp 'for))
+(define (for-body exp) (cddddr exp))
+(define (for-initialize exp) (cadr exp))
+(define (for-predicate exp) (caddr exp))
+(define (for-increment exp) (cadddr exp))
+
+(define (for->combination exp)
+  (make-named-let
+    '*reserved-for*
+    (list (for-initialize exp))
+    (make-if
+      (for-predicate exp)
+      (make-begin
+        (append
+          (for-body exp)
+          (list
+            (make-application '*reserved-for*
+                              (list (for-increment exp))))))
+      '())))
+
 (define (true? x) (not (eq? x #f)))
 (define (false? x) (eq? x #f))
 
@@ -174,7 +294,10 @@
   (list 'procedure parameters body env))
 (define (compound-procedure? p)
   (tagged-list? p 'procedure))
-(define (procedure-parameters p) (cadr p))
+(define (procedure-parameters-var-args p) (cadr p))
+(define (procedure-parameters p)
+  (filter (lambda (arg) (not (eq? arg ':)))
+          (cadr p)))
 (define (procedure-body p) (caddr p))
 (define (procedure-environment p) (cadddr p))
 
@@ -188,6 +311,7 @@
 (define (add-binding-to-frame! var val frame)
   (set-car! frame (cons var (car frame)))
   (set-cdr! frame (cons val (cdr frame))))
+
 (define (extend-environment vars vals base-env)
   (let ((len-vars (length vars))
         (len-vals (length vals)))
@@ -241,14 +365,39 @@
 (define primitive-procedures
   (list (list 'car car)
         (list 'cdr cdr)
+        (list 'caar   caar)   (list 'cadr   cadr)   (list 'cdar   cdar)   (list 'cddr   cddr)
+        (list 'caaar  caaar)  (list 'caadr  caadr)  (list 'cadar  cadar)  (list 'caddr  caddr)
+        (list 'cdaar  cdaar)  (list 'cdadr  cdadr)  (list 'cddar  cddar)  (list 'cdddr  cdddr)
+        (list 'caaaar caaaar) (list 'caaadr caaadr) (list 'caadar caadar) (list 'caaddr caaddr)
+        (list 'cadaar cadaar) (list 'cadadr cadadr) (list 'caddar caddar) (list 'cadddr cadddr)
+        (list 'cdaaar cdaaar) (list 'cdaadr cdaadr) (list 'cdadar cdadar) (list 'cdaddr cdaddr)
+        (list 'cddaar cddaar) (list 'cddadr cddadr) (list 'cdddar cdddar) (list 'cddddr cddddr)
         (list 'cons cons)
+        (list 'set-car! set-car!)
+        (list 'set-cdr! set-cdr!)
+        (list 'list list)
         (list 'null? null?)
+        (list 'number? number?)
+        (list 'string? string?)
+        (list 'pair? pair?)
+        (list 'symbol? symbol?)
+        (list 'eq? eq?)
+        (list 'length length)
+        (list 'error error)
+        (list 'eval eval)
+        (list 'apply meta-apply)
+        (list 'read read)
         (list '= =)
         (list '+ +)
         (list '- -)
         (list '* *)
         (list '/ /)
         (list 'display display)
+        (list 'newline newline)
+        (list 'print print)
+        (list '#t #t)
+        (list '#f #f)
+        (list '() '())
         ; (list ')
         ; ⟨more primitives⟩
         ))
@@ -258,7 +407,7 @@
   (map (lambda (proc) (list 'primitive (cadr proc)))
        primitive-procedures))
 (define (apply-primitive-procedure proc args)
-  (apply-in-underlying-scheme
+  (apply
     (primitive-implementation proc) args))
 
 (define (setup-environment)
@@ -279,18 +428,51 @@
   (newline) (display string) (newline))
 (define (user-print object)
   (if (compound-procedure? object)
-      (display (list 'compound-procedure
-                     (procedure-parameters object)
-                     (procedure-body object)
-                     '<procedure-env>))
+      (display (append
+                 (list 'compound-procedure
+                       (procedure-parameters-var-args object))
+                 (append (procedure-body object)
+                         '(<procedure-env>))))
       (display object)))
 (define (driver-loop)
   (prompt-for-input input-prompt)
-  (let ((input (read)))
-    (let ((output (eval input the-global-environment)))
-      (announce-output output-prompt)
-      (user-print output)))
+  (let* ((input (read))
+         (output (eval input the-global-environment)))
+    (announce-output output-prompt)
+    (user-print output))
   (driver-loop))
 
-#| (define the-global-environment (setup-environment)) |#
-(driver-loop)
+(define map-proc
+  '(define (map proc : lists)
+    (define (map-1 proc lst)
+      (if (null? lst)
+          '()
+          (cons (proc (car lst))
+                (map-1 proc (cdr lst)))))
+    (if (null? (car lists))
+        '()
+        (cons
+          (apply proc (map-1 car lists))
+          (apply map
+                 (cons proc (map-1 cdr lists)))))))
+(eval map-proc the-global-environment)
+
+#| (driver-loop) |#
+
+(define for-let
+  (for->combination
+    '(for (i 0) (< i 5) (+ i 1)
+      (display i))))
+
+(let->combination for-let)
+
+#| (let *reserved-for* ((i 0)) (if (< i 5) (begin (display i) (*reserved-for* (+ i 1))) ())) |#
+
+#| (let  |#
+#|   ((*reserved-for*  |#
+#|      (lambda (i)  |#
+#|        (if (< i 5)  |#
+#|            (begin (display i) (*reserved-for* (+ i 1)))  |#
+#|            ()))))  |#
+#|   (*reserved-for* 0)) |#
+
