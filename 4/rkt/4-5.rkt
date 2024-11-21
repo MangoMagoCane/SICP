@@ -17,7 +17,7 @@
                 (sequence->exp (cond-actions first))
                 (error "ELSE clause isn't last: COND->IF"
                        clauses))
-            (if (arrow-cond? first)
+            (if (cond-arrow-clause? first)
                 (make-application
                   (make-lambda '(_RESERVED_COND)
                                (make-if '_RESERVED-COND
@@ -27,5 +27,4 @@
                   (cond-predicate first))
                 (make-if (cond-predicate first)
                          (sequence->exp (cond-actions first))
-                         (expand-clauses rest))))))
-
+                         (expand-clauses rest)))))))

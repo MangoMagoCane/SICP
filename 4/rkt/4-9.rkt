@@ -1,18 +1,19 @@
 #lang sicp
 
-(define (for-body exp) (cddddr exp))
+(define (for? exp) (tagged-list exp 'for))
 (define (for-initialize exp) (cadr exp))
 (define (for-predicate exp) (caddr exp))
 (define (for-increment exp) (cadddr exp))
+(define (for-body exp) (cddddr exp))
 
 (define (for->combination exp)
-  (make-named-let 
-    '_RESERVED_FOR
+  (make-named-let
+    '*reserved-for*
     (list (for-initialize exp))
     (make-if (for-predicate exp)
-              (make-begin 
+              (make-begin
                 (append (for-body exp)
-                        (list (make-application '_RESERVED_FOR
+                        (list (make-application '*reserved-for*
                                           (list (for-increment exp))))))
             '())))
 
