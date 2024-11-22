@@ -7,7 +7,7 @@
 (define (let*-clauses exp) (cadr exp))
 (define (let*-body exp) (caddr exp))
 
-(define (let*->nested-lets exp)
+(define (let*->combination exp)
   (define (expand-clauses clauses)
     (let ((first (car clauses))
           (rest (cdr clauses)))
