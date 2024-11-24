@@ -1,9 +1,9 @@
 #lang sicp
 
 (define (make-let clauses body)
-  (list 'let clauses body))
+  (cons 'let (cons clauses body)))
 (define (make-named-let var bindings body)
-  (list 'let var bindings body))
+  (cons 'let (cons var bindings body)))
 
 (define (let? exp) (tagged-list? exp 'let))
 (define (named-let? exp) (not (pair? (named-let-var exp))))
@@ -24,7 +24,7 @@
       (if (null? rest)
           (make-application
             (make-lambda (reverse (cons (let-var first) vars))
-                         (list (let-body exp)))
+                         (let-body exp))
             (reverse (cons (let-exp first) exps)))
           (expand-clauses rest
                           (cons (let-var first) vars)
@@ -32,11 +32,15 @@
   (define (expand-named-let exp)
     (let ((var (named-let-var exp))
           (bindings (named-let-bindings exp)))
-      (make-let 
-        (list (list var (make-lambda
-                          (map let-var bindings)
-                          (list (named-let-body exp)))))
-        (make-application var (map let-exp bindings)))))
+      (make-application
+        (make-lambda
+          '()
+          (list
+            (make-definition
+              (cons var (map let-var bindings))
+              (named-let-body exp))
+            (cons var (map let-exp bindings))))
+          '())))
   (if (named-let? exp)
       (expand-named-let exp)
       (expand-clauses (let-clauses exp) '() '())))
