@@ -17,9 +17,9 @@
           (scan (frame-variables frame)
           (frame-values frame)))))
   (let ((invalid-symbol? (memq var invalid-symbols)))
-    (if invalid-symbol?)
+    (if invalid-symbol?
         (error "Attempted lookup of symbol" (car invalid-symbol?))
-        (env-loop env)))
+        (env-loop env))))
 
 (define (scan-out-defines body proc)
   (define (scan exps defns)
