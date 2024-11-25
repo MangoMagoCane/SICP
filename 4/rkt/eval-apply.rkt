@@ -6,14 +6,28 @@
           (cons (car sequence)
                 (filter predicate (cdr sequence))))
         (else (filter predicate (cdr sequence)))))
+
+(define (filter-both-pos filter-pair) (car filter-pair))
+(define (filter-both-neg filter-pair) (cdr filter-pair))
+(define (filter-both predicate sequence)
+  (define (inner seq t-seq f-seq)
+    (cond ((null? seq)
+            (cons (reverse t-seq)
+                  (reverse f-seq)))
+          ((predicate (car seq))
+            (inner (cdr seq)
+                   (cons (car seq) t-seq)
+                   f-seq))
+          (else
+            (inner (cdr seq)
+                   t-seq
+                   (cons (car seq) f-seq)))))
+  (inner sequence '() '()))
+
 (define (print . exps)
   (for-each (lambda (exp) (display exp) (display " "))
             exps)
   (newline))
-(define (apply-n op val n)
-  (if (= n 0)
-      val
-      (apply-n op (op val) (- n 1))))
 
 (define (eval exp env)
   (cond ((self-evaluating? exp) exp)
@@ -34,53 +48,112 @@
         ((let*? exp) (eval (let*->combination exp) env))
         ((for? exp) (eval (for->combination exp) env))
         ((application? exp)
-          (meta-apply (eval (operator exp) env)
-                      (list-of-values (operands exp) env)))
+          (meta-apply (actual-value (operator exp) env)
+                      (operands exp)
+                      env))
         (else
           (error "Unknown expression type: EVAL" exp))))
 
-(define (foo args params)
-  (if (null? args)
-      '()
-      (let ((new-params
-              (if (null? params)
-                  params
-                  (cdr params))))
-        (if (variable-args? params)
-            (list (cons (car args) (foo (cdr args) new-params)))
-            (cons (car args) (foo (cdr args) new-params))))))
-
-(define (meta-apply procedure arguments)
+(define (meta-apply procedure arguments env)
   (cond ((primitive-procedure? procedure)
-          (apply-primitive-procedure procedure arguments))
+          (apply-primitive-procedure
+            procedure
+            (list-of-arg-values arguments env)))
         ((compound-procedure? procedure)
           (eval-sequence
             (procedure-body procedure)
             (extend-environment
               (procedure-parameters procedure)
-              (foo arguments (procedure-parameters-var-args procedure))
+              (process-args arguments (proc-params-var-args procedure) env)
               (procedure-environment procedure))))
         (else
           (error
             "Unknown procedure type: APPLY" procedure))))
 
-(define (variable-args? exp) (tagged-list? exp ':))
+(define (delay-it exp env)
+  (list 'thunk exp env))
+(define (delay-memo-it exp env)
+  (list 'memo-thunk exp env))
+(define (thunk? obj)
+  (tagged-list? obj 'thunk))
+(define (memo-thunk? obj)
+  (tagged-list? obj 'memo-thunk))
+(define (evaluated-memo-thunk? obj)
+  (tagged-list? obj 'evaluated-memo-thunk))
+(define (thunk-value evaluated-thunk)
+  (cadr evaluated-thunk))
+(define (thunk-exp thunk) (cadr thunk))
+(define (thunk-env thunk) (caddr thunk))
+
+(define (actual-value exp env)
+  (force-it (eval exp env)))
+(define (force-it obj)
+  (cond ((thunk? obj)
+          (actual-value (thunk-exp obj) (thunk-env obj)))
+        ((memo-thunk? obj)
+          (let ((result (actual-value (thunk-exp obj)
+                                      (thunk-env obj))))
+            (set-car! obj 'evaluated-memo-thunk)
+            (set-car! (cdr obj)
+                      result) ; replace exp with its value
+            (set-cdr! (cdr obj)
+                      '()) ; forget unneeded env
+            result))
+        ((evaluated-memo-thunk? obj) (thunk-value obj))
+        (else obj)))
+
+(define (variable-args? arg-list) (tagged-list? arg-list ':))
+(define (lazy-param? param)
+  (and (pair? param) (eq? (cadr param) 'lazy)))
+(define (lazy-memo-param? param)
+  (and (pair? param) (eq? (cadr param) 'memo)))
+(define (first-param param-list) (car param-list))
+(define (rest-params param-list) (cdr param-list))
+(define (first-arg arg-list) (car arg-list))
+(define (rest-args arg-list) (cdr arg-list))
+
+(define (process-args args params env)
+  (if (null? args)
+      '()
+      (let ((new-params
+             (if (null? params)
+                 '()
+                 (rest-params params))))
+        (if (variable-args? params)
+            (list (cons (actual-value (first-arg args) env)
+                        (process-args (rest-args args) new-params env)))
+            (let ((proc
+                    (if (and (not (null? params)) (pair? (first-param params)))
+                        (let ((param (first-param params)))
+                          (cond ((lazy-param? param)  delay-it)
+                                ((lazy-memo-param? param) delay-memo-it)
+                                (else (error "Invalid param setting" param))))
+                        actual-value)))
+              (cons (proc (first-arg args) env)
+                    (process-args (rest-args args) new-params env)))))))
 
 (define (list-of-values exps env)
   (if (no-operands? exps)
       '()
       (cons (eval (first-operand exps) env)
             (list-of-values (rest-operands exps) env))))
+(define (list-of-arg-values exps env)
+  (if (no-operands? exps)
+      '()
+      (cons (actual-value (first-operand exps)
+                          env)
+            (list-of-arg-values (rest-operands exps)
+                          env))))
 
 (define (eval-if exp env)
-  (if (true? (eval (if-predicate exp) env))
+  (if (true? (actual-value (if-predicate exp) env))
       (eval (if-consequent exp) env)
       (eval (if-alternative exp) env)))
 (define (eval-sequence exps env)
   (if (last-exp? exps)
       (eval (first-exp exps) env)
       (begin
-        (eval (first-exp exps) env)
+        (actual-value (first-exp exps) env)
         (eval-sequence (rest-exps exps) env))))
 
 (define (eval-assignment exp env)
@@ -105,6 +178,14 @@
   (if (pair? exp)
       (eq? (car exp) tag)
       #f))
+(define (tagged-end-list? exp tag)
+  (define (inner exp)
+    (if (null? (cdr exp))
+        (eq? (car exp) tag)
+        (inner (cdr exp))))
+  (if (pair? exp)
+      (inner exp)
+      #f))
 
 (define (assignment? exp) (tagged-list? exp 'set!))
 (define (assignment-variable exp) (cadr exp))
@@ -112,6 +193,7 @@
 (define (definition? exp) (tagged-list? exp 'define))
 (define (make-definition definition body)
   (list 'define definition body))
+
 (define (definition-variable exp)
   (if (symbol? (cadr exp))
       (cadr exp)
@@ -120,10 +202,82 @@
   (if (symbol? (cadr exp))
       (caddr exp)
       (make-lambda (cdadr exp) ; formal parameters
-                   (list (cddr exp))))) ; body
+                   (cddr exp)))) ; body
+
+(define (defn-clause-var clause) (car clause))
+(define (defn-clause-exp clause) (cadr clause))
+
+(define (scan-out-defines body proc)
+  (define (scan exps defns)
+    (let ((curr-exp (first-exp exps)))
+      (if (definition? curr-exp)
+          (scan
+            (rest-exps exps)
+            (cons (list (definition-variable curr-exp)
+                        (definition-value curr-exp))
+                  defns))
+          (proc defns exps))))
+  (if (definition? (first-exp body))
+      (scan body '())
+      body))
+    
+(define (scan-out-defines-let-set body)
+  (scan-out-defines
+    body
+    (lambda (defns rest-of-body)
+      (let ((defns-correct-order (reverse defns)))
+        (list
+          (make-let
+            (map
+                (lambda (exp)
+                  (list (defn-clause-var exp)
+                        ''*unassigned*))
+                defns-correct-order)
+            (append
+              (map
+                (lambda (exp)
+                  (list 'set!
+                        (defn-clause-var exp)
+                        (defn-clause-exp exp)))
+                defns-correct-order)
+              rest-of-body)))))))
+
+(define (scan-out-defines-simultaneous body)
+  (define (eq-rec? exp vars)
+    (if (pair? exp)
+        (or (eq-rec? (car exp) vars)
+            (eq-rec? (cdr exp) vars))
+        (memq exp vars)))
+  (define (inner clauses ordered-clauses prev-length)
+    (if (null? clauses)
+        ordered-clauses
+        (let* ((definitions (map defn-clause-var clauses))
+              (filtered-clauses
+                (filter-both
+                  (lambda (clause)
+                    (let ((res (eq-rec? (defn-clause-exp clause) definitions)))
+                      (or (and (lambda? (defn-clause-exp clause))
+                               (eq? (defn-clause-var clause) (if (pair? res) (car res) res)))
+                          (not res))))
+                  clauses))
+              (available-clauses (filter-both-pos filtered-clauses))
+              (dependent-clauses (filter-both-neg filtered-clauses))
+              (curr-length (length dependent-clauses)))
+          (if (= curr-length prev-length)
+              (error "Recursively defined internal definitions" clauses)
+              (inner dependent-clauses 
+                    (append ordered-clauses (map (lambda (clause) (cons 'define clause))
+                                      available-clauses))
+                    curr-length)))))
+  (scan-out-defines
+    body
+    (lambda (defns rest-of-body)
+      (append (inner defns '() -1)
+              rest-of-body))))
+
 (define (lambda? exp) (tagged-list? exp 'lambda))
 (define (lambda-parameters exp) (cadr exp))
-(define (lambda-body exp) (caddr exp))
+(define (lambda-body exp) (cddr exp))
 (define (make-lambda parameters body)
   (cons 'lambda (cons parameters body)))
 
@@ -176,14 +330,14 @@
           (if (cond-else-clause? first)
               (if (null? rest)
                   (sequence->exp (cond-actions first))
-                  (error "ELSE clause isn't last: COND->IF"
+                  (error "else clause isn't last: COND->IF"
                         clauses))
               (if (cond-arrow-clause? first)
                   (make-application
-                    (make-lambda '(_RESERVED_COND)
-                                (make-if '_RESERVED-COND
+                    (make-lambda '(*reserved-cond*) ; investigate later, may be incorrect
+                                 (make-if '*reserved-cond*
                                           (make-application (cond-arrow-action first)
-                                                            '(_RESERVED-COND))
+                                                            '(*reserved-cond*))
                                           (expand-clauses rest)))
                     (cond-predicate first))
                   (make-if (cond-predicate first)
@@ -192,13 +346,14 @@
   (expand-clauses (cond-clauses exp)))
 
 (define (make-let clauses body)
-  (list 'let clauses body))
+  (cons 'let (cons clauses body)))
 (define (make-named-let var bindings body)
-  (list 'let var bindings body))
+  (cons 'let (cons var bindings body)))
 (define (let? exp) (tagged-list? exp 'let))
 (define (named-let? exp) (not (pair? (named-let-var exp))))
 (define (let-clauses exp) (cadr exp))
-(define (let-body exp) (caddr exp))
+(define (let-body exp) 
+  (cddr exp)) 
 (define (let-var clause) (car clause))
 (define (let-exp clause) (cadr clause))
 (define (named-let-var exp) (cadr exp))
@@ -212,7 +367,7 @@
       (if (null? rest)
           (make-application
             (make-lambda (reverse (cons (let-var first) vars))
-                         (list (let-body exp)))
+                         (let-body exp))
             (reverse (cons (let-exp first) exps)))
           (expand-clauses rest
                           (cons (let-var first) vars)
@@ -220,11 +375,15 @@
   (define (expand-named-let exp)
     (let ((var (named-let-var exp))
           (bindings (named-let-bindings exp)))
-      (make-let
-        (list (list var (make-lambda
-                          (map let-var bindings)
-                          (list (named-let-body exp)))))
-        (make-application var (map let-exp bindings)))))
+      (make-application
+        (make-lambda
+          '()
+          (list
+            (make-definition
+              (cons var (map let-var bindings))
+              (named-let-body exp))
+            (cons var (map let-exp bindings))))
+          '())))
   (if (named-let? exp)
       (expand-named-let exp)
       (expand-clauses (let-clauses exp) '() '())))
@@ -277,27 +436,35 @@
   (make-named-let
     '*reserved-for*
     (list (for-initialize exp))
-    (make-if
-      (for-predicate exp)
-      (make-begin
-        (append
-          (for-body exp)
-          (list
-            (make-application '*reserved-for*
-                              (list (for-increment exp))))))
-      '())))
+      (make-if
+        (for-predicate exp)
+        (make-begin
+          (append
+            (for-body exp)
+            (list
+              (make-application '*reserved-for*
+                                (list (for-increment exp))))))
+        'false)))
 
 (define (true? x) (not (eq? x #f)))
 (define (false? x) (eq? x #f))
 
 (define (make-procedure parameters body env)
-  (list 'procedure parameters body env))
+  (list 'procedure parameters (scan-out-defines-simultaneous body) env))
 (define (compound-procedure? p)
   (tagged-list? p 'procedure))
-(define (procedure-parameters-var-args p) (cadr p))
+(define (proc-params-var-args p) (cadr p))
+#| (define (procedure-parameters p) |#
+#|   (filter (lambda (arg) (not (eq? arg ':))) |#
+#|           (cadr p))) |#
 (define (procedure-parameters p)
-  (filter (lambda (arg) (not (eq? arg ':)))
-          (cadr p)))
+  (define (inner params)
+    (cond ((null? params) '())
+          ((eq? (car params) ':) (inner (cdr params)))
+          ((pair? (car params)) (cons (caar params) (inner (cdr params))))
+          (else (cons (car params) (inner (cdr params))))))
+  (inner (cadr p)))
+
 (define (procedure-body p) (caddr p))
 (define (procedure-environment p) (cadddr p))
 
@@ -322,6 +489,7 @@
             (error "Too few arguments supplied" vars vals)))))
 
 (define (lookup-variable-value var env)
+  (define invalid-symbols '(*unassigned*))
   (define (env-loop env)
     (define (scan vars vals)
       (cond ((null? vars)
@@ -333,7 +501,10 @@
         (let ((frame (first-frame env)))
           (scan (frame-variables frame)
           (frame-values frame)))))
-  (env-loop env))
+  (let ((invalid-symbol? (memq var invalid-symbols)))
+    (if invalid-symbol?
+        (error "Attempted lookup of symbol" (car invalid-symbol?))
+        (env-loop env))))
 
 (define (set-variable-value! var val env)
   (define (env-loop env)
@@ -388,13 +559,18 @@
         (list 'apply meta-apply)
         (list 'read read)
         (list '= =)
+        (list '< <)
+        (list '> >)
         (list '+ +)
         (list '- -)
         (list '* *)
         (list '/ /)
         (list 'display display)
         (list 'newline newline)
-        (list 'print print)
+        (list 'print (lambda (first . rest)
+                       (if (null? rest)
+                           (print "PRINT:" first)
+                           (apply print (append (list "PRINT:" first) rest)))))
         (list '#t #t)
         (list '#f #f)
         (list '() '())
@@ -423,21 +599,21 @@
 (define input-prompt ";;; M-Eval input:")
 (define output-prompt ";;; M-Eval value:")
 (define (prompt-for-input string)
-  (newline) (newline) (display string) (newline))
+  (newline) (newline) (print string))
 (define (announce-output string)
-  (newline) (display string) (newline))
+  (newline) (print string))
 (define (user-print object)
   (if (compound-procedure? object)
       (display (append
                  (list 'compound-procedure
-                       (procedure-parameters-var-args object))
+                       (proc-params-var-args object))
                  (append (procedure-body object)
                          '(<procedure-env>))))
       (display object)))
 (define (driver-loop)
   (prompt-for-input input-prompt)
   (let* ((input (read))
-         (output (eval input the-global-environment)))
+         (output (actual-value input the-global-environment)))
     (announce-output output-prompt)
     (user-print output))
   (driver-loop))
@@ -457,22 +633,18 @@
                  (cons proc (map-1 cdr lists)))))))
 (eval map-proc the-global-environment)
 
-#| (driver-loop) |#
+(print "----------------------------------------------")
 
-(define for-let
-  (for->combination
-    '(for (i 0) (< i 5) (+ i 1)
-      (display i))))
+(actual-value
+  '(define (foo a (b lazy) (c memo))
+     (+ a a b b c c c c) (print c) c)
+  the-global-environment)
 
-(let->combination for-let)
+(actual-value
+  '(foo ((lambda () (print "foo") 1))
+        ((lambda () (print "bar") 2))
+        ((lambda () (print "baz") 3)))
+  the-global-environment)
 
-#| (let *reserved-for* ((i 0)) (if (< i 5) (begin (display i) (*reserved-for* (+ i 1))) ())) |#
-
-#| (let  |#
-#|   ((*reserved-for*  |#
-#|      (lambda (i)  |#
-#|        (if (< i 5)  |#
-#|            (begin (display i) (*reserved-for* (+ i 1)))  |#
-#|            ()))))  |#
-#|   (*reserved-for* 0)) |#
+(driver-loop)
 
