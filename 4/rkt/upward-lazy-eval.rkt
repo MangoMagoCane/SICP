@@ -634,28 +634,37 @@
 
 (define defn-procs
   '((define (map proc : lists)
-      (define (map-1 proc lst)
-        (if (null? lst)
-            '()
-            (cons (proc (car lst))
-                  (map-1 proc (cdr lst)))))
-      (if (null? (car lists))
+    (define (map-1 proc lst)
+      (if (null? lst)
           '()
-          (cons
-            (apply proc (map-1 car lists))
-            (apply map
-                  (cons proc (map-1 cdr lists))))))))
+          (cons (proc (car lst))
+                (map-1 proc (cdr lst)))))
+    (if (null? (car lists))
+        '()
+        (cons
+          (apply proc (map-1 car lists))
+          (apply map
+                (cons proc (map-1 cdr lists))))))
+  (define (cons-stream x (y memo))
+    (lambda ((m memo)) (m x y)))
+  (define (stream-car (z memo))
+    (z (lambda ((p memo) (q memo)) p)))
+  (define (stream-cdr (z memo))
+    (z (lambda ((p memo) (q memo)) q)))
+  (define (stream-cadr (z memo))
+    (stream-car (stream-cdr z)))
+))
 (for-each (lambda (exp) (actual-value exp the-global-environment))
           defn-procs)
 
-(actual-value
-  '(define (foo a (b lazy) (c memo) : (d memo))
-     (print (+ a a b b c c))
-     (print (list a b c (car d) (cadr d)))
-     (cadr d)
-     (print d)
-     c)
-  the-global-environment)
+#| (actual-value |#
+#|   '(define (foo a (b lazy) (c memo) : (d memo)) |#
+#|      (print (+ a a b b c c)) |#
+#|      (print (list a b c (car d) (cadr d))) |#
+#|      (cadr d) |#
+#|      (print d) |#
+#|      c) |#
+#|   the-global-environment) |#
 
 #| (actual-value |#
 #|   '(foo ((lambda (a) (print "foo") a) 1) |#
@@ -671,11 +680,15 @@
 #|   '(map car '(1 1) '(2 2) '(3 3)) |#
 #|   the-global-environment) |#
 
+#| (actual-value |#
+#|   '(let* ((foo 1) |#
+#|           (foo 2) |#
+#|           (foo 3)) |#
+#|      (scope-search foo 2)) |#
+#|   the-global-environment) |#
+
 (actual-value
-  '(let* ((foo 1)
-          (foo 2)
-          (foo 3))
-     (scope-search foo 2))
+  '(stream-cadr integers)
   the-global-environment)
 
 #| (actual-value |#
