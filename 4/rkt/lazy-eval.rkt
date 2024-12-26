@@ -30,134 +30,101 @@
   (newline))
 
 (define (eval exp env)
-  (cond ((self-evaluating? exp) exp)
-        ((variable? exp) (lookup-variable-value exp env))
-        ((quote? exp) (text-of-quotation exp))
-        ((delay? exp) (make-delay exp env))
-        ((force? exp) (eval-force exp env))
-        ((assignment? exp) (eval-assignment exp env))
-        ((definition? exp) (eval-definition exp env))
-        ((if? exp) (eval-if exp env))
-        ((and? exp) (eval-and exp env))
-        ((or? exp) (eval-or exp env))
-        ((scope-search? exp) (eval-scope-search exp env))
-        ((lambda? exp) (make-lexical-procedure
-                         (lambda/mu-params exp)
-                         (lambda/mu-body exp)
-                         env))
-        ((mu? exp) (make-dynamic-procedure
-                     (lambda/mu-params exp)
-                     (lambda/mu-body exp)
-                     env))
-        ((begin? exp) (eval-sequence (begin-actions exp) env))
-        ((cond? exp) (eval-cond exp env))
-        ((let? exp) (eval-let exp env))
-        ((let*? exp) (eval-let* exp env))
-        #| ((for? exp) (eval-for exp env)) |#
-        ((application? exp)
-          (let ((proc (actual-value (operator exp) env)))
-            (meta-apply proc (process-args proc (operands exp) env) env)))
-        (else
-          (error "Unknown expression type: EVAL" exp))))
+  (cond
+    ((self-evaluating? exp) exp)
+    ((variable? exp) (lookup-variable-value exp env))
+    ((quoted? exp) (text-of-quotation exp env))
+    ((assignment? exp) (eval-assignment exp env))
+    ((definition? exp) (eval-definition exp env))
+    ((if? exp) (eval-if exp env))
+    ((and? exp) (eval-and exp env))
+    ((or? exp) (eval-or exp env))
+    ((lambda? exp) (make-procedure (lambda-parameters exp)
+                                    (lambda-body exp)
+                                    env))
+    ((begin? exp)
+      (eval-sequence (begin-actions exp) env))
+    ((cond? exp) (eval (cond->if exp) env))
+    ((let? exp) (eval (let->combination exp) env))
+    ((let*? exp) (eval (let*->combination exp) env))
+    ((for? exp) (eval (for->combination exp) env))
+    ((application? exp)
+      (meta-apply (actual-value (operator exp) env)
+                  (operands exp)
+                  env))
+    (else
+      (error "Unknown expression type: EVAL" exp))))
 
-(define (meta-apply proc args env)
-  (cond ((primitive-procedure? proc)
-          (apply-primitive-procedure proc args))
-        ((compound-procedure? proc)
+(define (meta-apply procedure arguments env)
+  (cond ((primitive-procedure? procedure)
+          (apply-primitive-procedure
+            procedure
+            (list-of-arg-values arguments env)))
+        ((compound-procedure? procedure)
           (eval-sequence
-            (procedure-body proc)
+            (procedure-body procedure)
             (extend-environment
-              (proc-params proc)
-              args
-              (cond ((lexical-procedure? proc)
-                      (proc-env proc))
-                    ((dynamic-procedure? proc)
-                      env)
-                    (error "Unknown binding method: APPLY" proc)))))
+              (procedure-parameters procedure)
+              (process-var-args
+                (list-of-delayed-args arguments env)
+                (procedure-parameters-var-args procedure))
+              (procedure-environment procedure))))
         (else
           (error
-            "Unknown procedure type: APPLY" proc))))
-
-(define (process-args proc args env)
-  (define (process-inner args params)
-      (if (null? params)
-          '()
-          (if (variable-args? params)
-              (let ((rest-of-params (rest-params params)))
-                (if (null? rest-of-params)
-                    (error "Missing param following \":\""
-                           (proc-params-var-args proc))
-                    (list (list-of-values
-                            (get-eval-proc (first-param rest-of-params))
-                            args
-                            env))))
-              (cons ((get-eval-proc (first-param params))
-                      (first-arg args)
-                      env)
-                    (process-inner (rest-args args) (rest-params params))))))
-    (cond ((primitive-procedure? proc)
-            (list-of-values actual-value args env))
-          ((compound-procedure? proc)
-            (process-inner args (proc-params-var-args proc)))))
-
-(define (get-eval-proc param)
-  (cond ((not (pair? param)) actual-value)
-        ((lazy-param? param) delay-it)
-        ((lazy-memo-param? param) delay-memo-it)
-        ((promise-param? param) make-promise)
-        (else (error "Invalid param setting" param))))
-
-(define (promise-param? param)
-  (and (pair? param) (or (eq? (cadr param) 'promise)
-                         (eq? (cadr param) 'prom))))
+            "Unknown procedure type: APPLY" procedure))))
 
 (define (delay-it exp env)
   (list 'thunk exp env))
-(define (delay-memo-it exp env)
-  (list 'memo-thunk exp env))
 (define (thunk? obj)
   (tagged-list? obj 'thunk))
-(define (memo-thunk? obj)
-  (tagged-list? obj 'memo-thunk))
-(define (evaluated-memo-thunk? obj)
-  (tagged-list? obj 'evaluated-memo-thunk))
-(define (thunk-value evaluated-thunk)
-  (cadr evaluated-thunk))
 (define (thunk-exp thunk) (cadr thunk))
 (define (thunk-env thunk) (caddr thunk))
+(define (evaluated-thunk? obj)
+  (tagged-list? obj 'evaluated-thunk))
+(define (thunk-value evaluated-thunk)
+  (cadr evaluated-thunk))
 
 (define (actual-value exp env)
   (force-it (eval exp env)))
 (define (force-it obj)
   (cond ((thunk? obj)
-          (actual-value (thunk-exp obj) (thunk-env obj)))
-        ((memo-thunk? obj)
           (let ((result (actual-value (thunk-exp obj)
                                       (thunk-env obj))))
-            (set-car! obj 'evaluated-memo-thunk)
+            (set-car! obj 'evaluated-thunk)
             (set-car! (cdr obj)
                       result) ; replace exp with its value
             (set-cdr! (cdr obj)
                       '()) ; forget unneeded env
             result))
-        ((evaluated-memo-thunk? obj) (thunk-value obj))
+        ((evaluated-thunk? obj) (thunk-value obj))
         (else obj)))
 
-(define (variable-args? param-list) (tagged-list? param-list ':))
-(define (lazy-param? param)
-  (and (pair? param) (eq? (cadr param) 'lazy)))
-(define (lazy-memo-param? param)
-  (and (pair? param) (eq? (cadr param) 'memo)))
-(define (first-param param-list) (car param-list))
-(define (rest-params param-list) (cdr param-list))
-(define (first-arg arg-list) (car arg-list))
-(define (rest-args arg-list) (cdr arg-list))
+(define (variable-args? exp) (tagged-list? exp ':))
+(define (process-var-args args params)
+  (if (null? args)
+      '()
+      (let ((new-params
+              (if (null? params)
+                  '()
+                  (rest-exps params))))
+        (if (variable-args? params)
+            (list (cons (first-exp args) (process-var-args (rest-exps args) new-params)))
+            (cons (first-exp args) (process-var-args (rest-exps args) new-params))))))
 
-(define (list-of-values eval-proc exps env)
+(define (list-of-arg-values exps env)
   (if (no-operands? exps)
       '()
-      (cons (eval-proc (first-operand exps) env)
-            (list-of-values eval-proc (rest-operands exps) env))))
+      (cons (actual-value (first-operand exps)
+                          env)
+            (list-of-arg-values (rest-operands exps)
+                                env))))
+(define (list-of-delayed-args exps env)
+  (if (no-operands? exps)
+      '()
+      (cons (delay-it (first-operand exps)
+                      env)
+      (list-of-delayed-args (rest-operands exps)
+                            env))))
 
 (define (eval-if exp env)
   (if (true? (actual-value (if-predicate exp) env))
@@ -186,45 +153,19 @@
         ((string? exp) #t)
         (else #f)))
 (define (variable? exp) (symbol? exp))
-(define (quote? exp) (tagged-list? exp 'quote))
-(define (text-of-quotation exp) (cadr exp))
+(define (quoted? exp) (tagged-list? exp 'quote))
+(define (text-of-quotation exp env)
+  (define (rec-quote exp)
+    (if (pair? exp)
+        (list 'cons (rec-quote (car exp)) (rec-quote (cdr exp)))
+        (list 'quote exp)))
+  (if (pair? (cadr exp))
+      (eval (rec-quote (cadr exp)) env)
+      (cadr exp)))
 (define (tagged-list? exp tag)
   (if (pair? exp)
       (eq? (car exp) tag)
       #f))
-(define (tagged-end-list? exp tag)
-  (define (inner exp)
-    (if (null? (cdr exp))
-        (eq? (car exp) tag)
-        (inner (cdr exp))))
-  (if (pair? exp)
-      (inner exp)
-      #f))
-
-(define (promise-tag promise) (car promise))
-(define (promise-exp promise) (cadr promise))
-(define (promise-env promise) (caddr promise))
-(define (promise-value evaluated-promise)
-  (cadr evaluated-promise))
-(define (delay? exp) (tagged-list? exp 'delay))
-(define (promise? exp) (tagged-list? exp 'promise))
-(define (evaluated-promise? exp) (tagged-list? exp 'evaluated-promise))
-(define (make-delay exp env)
-  (make-promise (cadr exp) env))
-(define (make-promise exp env)
-  (list 'promise exp env))
-
-(define (force? exp) (tagged-list? exp 'force))
-(define (eval-force exp env)
-  (let ((obj (eval (cadr exp) env)))
-    (cond ((promise? obj)
-           (let ((res (eval (promise-exp obj) (promise-env obj))))
-            (set-car! obj 'evaluated-promise)
-            (set-car! (cdr obj) res)
-            (set-cdr! (cdr obj) '())
-            res))
-          ((evaluated-promise? obj) (promise-value obj))
-          (else (error "Invalid promise type: EVAL-FORCE" exp obj)))))
 
 (define (assignment? exp) (tagged-list? exp 'set!))
 (define (assignment-variable exp) (cadr exp))
@@ -234,19 +175,14 @@
   (list 'define definition body))
 
 (define (definition-variable exp)
-  (cond ((symbol? (cadr exp)) (cadr exp))
-        ((symbol? (caadr exp)) (caadr exp))
-        (else (caaadr exp))))
+  (if (symbol? (cadr exp))
+      (cadr exp)
+      (caadr exp)))
 (define (definition-value exp)
-  (cond ((symbol? (cadr exp))
-          (caddr exp))
-        ((and (pair? (caadr exp))
-              (eq? (car (cdaadr exp)) 'mu))
-          (make-mu (cdadr exp)
-                   (cddr exp)))
-        (else
-          (make-lambda (cdadr exp) ; formal parameters
-                       (cddr exp))))) ; body
+  (if (symbol? (cadr exp))
+      (caddr exp)
+      (make-lambda (cdadr exp) ; formal parameters
+                   (cddr exp)))) ; body
 
 (define (defn-clause-var clause) (car clause))
 (define (defn-clause-exp clause) (cadr clause))
@@ -264,7 +200,7 @@
   (if (definition? (first-exp body))
       (scan body '())
       body))
-
+    
 (define (scan-out-defines-let-set body)
   (scan-out-defines
     body
@@ -293,6 +229,7 @@
             (eq-rec? (cdr exp) vars))
         (memq exp vars)))
   (define (inner clauses ordered-clauses prev-length)
+    #| (print "CLAUSESS:" clauses) |#
     (if (null? clauses)
         ordered-clauses
         (let* ((definitions (map defn-clause-var clauses))
@@ -320,13 +257,10 @@
               rest-of-body))))
 
 (define (lambda? exp) (tagged-list? exp 'lambda))
-(define (mu? exp) (tagged-list? exp 'mu))
-(define (lambda/mu-params exp) (cadr exp))
-(define (lambda/mu-body exp) (cddr exp))
+(define (lambda-parameters exp) (cadr exp))
+(define (lambda-body exp) (cddr exp))
 (define (make-lambda parameters body)
   (cons 'lambda (cons parameters body)))
-(define (make-mu parameters body)
-  (cons 'mu (cons parameters body)))
 
 (define (if? exp) (tagged-list? exp 'if))
 (define (if-predicate exp) (cadr exp))
@@ -368,7 +302,7 @@
 (define (cond-arrow-clause? clause)
   (tagged-list? (cond-actions clause) '=>))
 
-(define (eval-cond exp env)
+(define (cond->if exp)
   (define (expand-clauses clauses)
     (if (null? clauses)
         'false ; no else clause
@@ -390,23 +324,24 @@
                   (make-if (cond-predicate first)
                           (sequence->exp (cond-actions first))
                           (expand-clauses rest)))))))
-  (eval (expand-clauses (cond-clauses exp))))
+  (expand-clauses (cond-clauses exp)))
 
 (define (make-let clauses body)
   (cons 'let (cons clauses body)))
 (define (make-named-let var bindings body)
-  (cons 'let (list var bindings body))) ; DEF WRONG
+  (cons 'let (cons var bindings body)))
 (define (let? exp) (tagged-list? exp 'let))
 (define (named-let? exp) (not (pair? (named-let-var exp))))
 (define (let-clauses exp) (cadr exp))
-(define (let-body exp) (cddr exp))
+(define (let-body exp) 
+  (cddr exp)) 
 (define (let-var clause) (car clause))
 (define (let-exp clause) (cadr clause))
 (define (named-let-var exp) (cadr exp))
 (define (named-let-bindings exp) (caddr exp))
 (define (named-let-body exp) (cadddr exp))
 
-(define (eval-let exp env)
+(define (let->combination exp)
   (define (expand-clauses clauses vars exps)
     (let ((first (car clauses))
           (rest (cdr clauses)))
@@ -430,27 +365,24 @@
               (named-let-body exp))
             (cons var (map let-exp bindings))))
           '())))
-  (eval
-    (if (named-let? exp)
-        (expand-named-let exp)
-        (expand-clauses (let-clauses exp) '() '()))
-    env))
+  (if (named-let? exp)
+      (expand-named-let exp)
+      (expand-clauses (let-clauses exp) '() '())))
 
 (define (make-let* clauses body)
-  (list 'let* clauses body)) ; P{ROBABLY} WRONBG
+  (list 'let* clauses body))
 (define (let*? exp) (tagged-list? exp 'let*))
 (define (let*-clauses exp) (cadr exp))
 (define (let*-body exp) (caddr exp))
 
-(define (eval-let* exp env)
+(define (let*->combination exp)
   (define (expand-clauses clauses)
-    (print clauses)
     (let ((first (car clauses))
           (rest (cdr clauses)))
       (if (null? rest)
-          (make-let (list first) (list (let*-body exp)))
-          (make-let (list first) (list (expand-clauses rest))))))
-  (eval (expand-clauses (let*-clauses exp)) env))
+          (make-let (list first) (let*-body exp))
+          (make-let (list first) (expand-clauses rest)))))
+  (expand-clauses (let*-clauses exp)))
 
 (define (and? exp) (tagged-list? exp 'and))
 (define (or? exp) (tagged-list? exp 'or))
@@ -476,69 +408,39 @@
   (inner (rest-exps exps)))
 
 (define (for? exp) (tagged-list? exp 'for))
+(define (for-body exp) (cddddr exp))
 (define (for-initialize exp) (cadr exp))
 (define (for-predicate exp) (caddr exp))
 (define (for-increment exp) (cadddr exp))
-(define (for-body exp) (cddddr exp))
 
-(define (eval-for exp env)
-  (eval
-    (make-named-let
-      '*reserved-for*
-      (list (for-initialize exp))
-        (make-if
-          (for-predicate exp)
-          (make-begin
-            (append
-              (for-body exp)
-              (list
-                (make-application '*reserved-for*
-                                  (list (for-increment exp))))))
-          'false))
-    env))
-
-(define (scope-search? exp) (tagged-list? exp 'scope-search))
-(define (scope-search-var exp) (cadr exp))
-(define (scope-search-count exp) (caddr exp))
-
-(define (eval-scope-search exp env)
-  (define (iter-envs count env)
-    (cond ((eq? env the-empty-environment)
-            (error "Invalid scope depth" exp))
-          ((= count 0) env)
-          (else (iter-envs (- count 1) (enclosing-environment env)))))
-  (lookup-variable-value
-    (scope-search-var exp)
-    (iter-envs (scope-search-count exp) env)))
+(define (for->combination exp)
+  (make-named-let
+    '*reserved-for*
+    (list (for-initialize exp))
+      (make-if
+        (for-predicate exp)
+        (make-begin
+          (append
+            (for-body exp)
+            (list
+              (make-application '*reserved-for*
+                                (list (for-increment exp))))))
+        'false)))
 
 (define (true? x) (not (eq? x #f)))
 (define (false? x) (eq? x #f))
 
-(define (make-lexical-procedure params body env)
-  (list 'procedure 'lexical params (scan-out-defines-simultaneous body) env))
-(define (make-dynamic-procedure params body env)
-  (list 'procedure 'dynamic params (scan-out-defines-simultaneous body) env))
-(define (compound-procedure? proc)
-  (tagged-list? proc 'procedure))
-(define (lexical-procedure? proc)
-  (eq? 'lexical (proc-env-binding proc)))
-(define (dynamic-procedure? proc)
-  (eq? 'dynamic (proc-env-binding proc)))
-
-(define (proc-env-binding proc) (cadr proc))
-(define (proc-params-var-args proc) (caddr proc))
-(define (proc-params proc)
-  (define (inner params)
-    (if (null? params)
-        '()
-        (let ((curr-param (first-param params)))
-          (cond ((eq? curr-param ':) (inner (rest-params params)))
-                ((pair? curr-param) (cons (car curr-param)
-                                          (inner (rest-params params))))
-                (else (cons curr-param (inner (rest-params params))))))))
-  (inner (proc-params-var-args proc)))
-(define (procedure-body proc) (cadddr proc))
-(define (proc-env proc) (car (cddddr proc)))
+(define (make-procedure parameters body env)
+  (list 'procedure parameters body env))
+  #| (list 'procedure parameters (scan-out-defines-let-set body) env)) |#
+(define (compound-procedure? p)
+  (tagged-list? p 'procedure))
+(define (procedure-parameters-var-args p) (cadr p))
+(define (procedure-parameters p)
+  (filter (lambda (arg) (not (eq? arg ':)))
+          (cadr p)))
+(define (procedure-body p) (caddr p))
+(define (procedure-environment p) (cadddr p))
 
 (define (enclosing-environment env) (cdr env))
 (define (first-frame env) (car env))
@@ -606,18 +508,17 @@
 (define (primitive-implementation proc) (cadr proc))
 
 (define primitive-procedures
-  (list (list 'car car)
-        (list 'cdr cdr)
-        (list 'caar   caar)   (list 'cadr   cadr)   (list 'cdar   cdar)   (list 'cddr   cddr)
-        (list 'caaar  caaar)  (list 'caadr  caadr)  (list 'cadar  cadar)  (list 'caddr  caddr)
-        (list 'cdaar  cdaar)  (list 'cdadr  cdadr)  (list 'cddar  cddar)  (list 'cdddr  cdddr)
-        (list 'caaaar caaaar) (list 'caaadr caaadr) (list 'caadar caadar) (list 'caaddr caaddr)
-        (list 'cadaar cadaar) (list 'cadadr cadadr) (list 'caddar caddar) (list 'cadddr cadddr)
-        (list 'cdaaar cdaaar) (list 'cdaadr cdaadr) (list 'cdadar cdadar) (list 'cdaddr cdaddr)
-        (list 'cddaar cddaar) (list 'cddadr cddadr) (list 'cdddar cdddar) (list 'cddddr cddddr)
-        (list 'cons cons)
-        #| (list 'set-car! set-car!) |#
-        #| (list 'set-cdr! set-cdr!) |#
+  (list #| (list 'car car) |#
+        #| (list 'cdr cdr) |#
+        #| (list 'caaar  caaar)  (list 'caadr  caadr)  (list 'cadar  cadar)  (list 'caddr  caddr) |#
+        #| (list 'cdaar  cdaar)  (list 'cdadr  cdadr)  (list 'cddar  cddar)  (list 'cdddr  cdddr) |#
+        #| (list 'caaaar caaaar) (list 'caaadr caaadr) (list 'caadar caadar) (list 'caaddr caaddr) |#
+        #| (list 'cadaar cadaar) (list 'cadadr cadadr) (list 'caddar caddar) (list 'cadddr cadddr) |#
+        #| (list 'cdaaar cdaaar) (list 'cdaadr cdaadr) (list 'cdadar cdadar) (list 'cdaddr cdaddr) |#
+        #| (list 'cddaar cddaar) (list 'cddadr cddadr) (list 'cdddar cdddar) (list 'cddddr cddddr) |#
+        #| (list 'cons cons) |#
+        (list 'set-car! set-car!)
+        (list 'set-cdr! set-cdr!)
         (list 'list list)
         (list 'null? null?)
         (list 'number? number?)
@@ -641,8 +542,8 @@
         (list 'newline newline)
         (list 'print (lambda (first . rest)
                        (if (null? rest)
-                           (print "PRINT;" first)
-                           (apply print (append (list "PRINT;" first) rest)))))
+                           (print "PRINT:" first)
+                           (apply print (append (list "PRINT:" first) rest)))))
         (list '#t #t)
         (list '#f #f)
         (list '() '())
@@ -675,15 +576,13 @@
 (define (announce-output string)
   (newline) (print string))
 (define (user-print object)
-  (display
-    (cond ((compound-procedure? object)
-            (append
-              (list (string-append (symbol->string (proc-env-binding object)) "-procedure")
-                    (proc-params-var-args object))
-              (append (procedure-body object)
-                      '(<procedure-env>))))
-          ((promise? object) (list (promise-tag object) (promise-value object)))
-          (else object))))
+  (if (compound-procedure? object)
+      (display (append
+                 (list 'compound-procedure
+                       (procedure-parameters-var-args object))
+                 (append (procedure-body object)
+                         '(<procedure-env>))))
+      (display object)))
 (define (driver-loop)
   (prompt-for-input input-prompt)
   (let* ((input (read))
@@ -692,120 +591,53 @@
     (user-print output))
   (driver-loop))
 
-(define (eval-exprs expr-lst)
-  (for-each (lambda (exp) (actual-value exp the-global-environment))
-            expr-lst))
-(define (eval-print-exprs expr-lst)
-  (for-each (lambda (exp) (user-print (actual-value exp the-global-environment)) (newline))
-            expr-lst))
-
-(define defn-procs
+(define defn-procs 
 '(
-  (define (map proc : lists)
-    (define (map-1 proc lst)
-      (if (null? lst)
-          '()
-          (cons (proc (car lst))
-                (map-1 proc (cdr lst)))))
-  (if (null? (car lists))
-      '()
-      (cons
-        (apply proc (map-1 car lists))
-        (apply map
-              (cons proc (map-1 cdr lists))))))
-  #| (define (cons-stream x (y memo)) |#
-  #|   (lambda ((m memo)) (m x y))) |#
-  #| (define (stream-car (z memo)) |#
-  #|   (z (lambda ((p memo) (q memo)) p))) |#
-  #| (define (stream-cdr (z memo)) |#
-  #|   (z (lambda ((p memo) (q memo)) q))) |#
-  #| (define (stream-cadr (z memo)) |#
-  #|   (stream-car (stream-cdr z))) |#
-
-  (define (cons-stream x (y promise))
-    (cons x y))
-  (define (stream-car z) (car z))
-  (define (stream-cdr z) (force (cdr z)))
-  (define (stream-cadr z) (stream-car (stream-cdr z)))
-  (define (integers-starting-from n)
-    (cons-stream n (integers-starting-from (+ n 1))))
-  (define (integers-added-by n m)
-    (cons-stream n (integers-added-by (+ n m) m)))
-  (define integers (integers-starting-from 1))
-  (define evens (integers-added-by 0 2))
-  (define (stream-ref s n)
-    (if (= n 0)
-        (stream-car s)
-        (stream-ref (stream-cdr s) (- n 1))))
-  #| (define (for (init prom) (pred prom) (inc prom) : (body prom)) |#
-  #|   (print (force init)) |#
-  #|   (let *reserved-for* ((init)) |#
-  #|     (if (force pred) |#
-  #|         (begin |#
-  #|           (force body) |#
-  #|           (*reserved-for* (force inc)) |#
-  #|         false)))) |#
+  #| (define (map proc : lists) |# ; var args broken rn kthxbye
+  #|   (define (map-1 proc lst) |#
+  #|     (if (null? lst) |#
+  #|         '() |#
+  #|         (cons (proc (car lst)) |#
+  #|               (map-1 proc (cdr lst))))) |#
+  #|   (if (null? (car lists)) |#
+  #|       '() |#
+  #|       (cons |#
+  #|         (apply proc (map-1 car lists)) |#
+  #|         (apply map |#
+  #|               (cons proc (map-1 cdr lists)))))) |#
+  (define (map proc items)
+    (if (null? items)
+        '()
+        (cons (proc (car items)) (map proc (cdr items)))))
+  (define (cons x y) (lambda (m) (m x y)))
+  (define (car z) (z (lambda (p q) p)))
+  (define (cdr z) (z (lambda (p q) q)))
+  #| (define (list-ref items n) |#
+  #|   (if (= n 0) |#
+  #|       (car items) |#
+  #|       (list-ref (cdr items) (- n 1)))) |#
+  #| (define (scale-list items factor) |#
+  #|   (map (lambda (x) (* x factor)) items)) |#
+  #| (define (add-lists list1 list2) |#
+  #|   (cond ((null? list1) list2) |#
+  #|         ((null? list2) list1) |#
+  #|         (else (cons (+ (car list1) (car list2)) |#
+  #|                     (add-lists (cdr list1) (cdr list2)))))) |#
+  #| (define ones (cons 1 ones)) |#
+  #| (define integers (cons 1 (add-lists ones integers))) |#
+  #| (define (integral integrand initial-value dt) |#
+  #| (define int |#
+  #|   (cons initial-value |#
+  #|         (add-lists (scale-list integrand dt) int))) |#
+  #|                     int) |#
+  #| (define (solve f y0 dt) |#
+  #|   (define y (integral dy y0 dt)) |#
+  #|   (define dy (map f y)) |#
+  #|   y) |#
 ))
-(eval-exprs defn-procs)
+(for-each (lambda (exp) (actual-value exp the-global-environment))
+          defn-procs)
+(print "----------------------------------------------")
 
-(actual-value
-  '(define (foo a (b lazy) (c memo) : (d memo))
-     (print (+ a a b b c c))
-     (print (list a b c (car d) (cadr d)))
-     (cadr d)
-     (print d)
-     c)
-  the-global-environment)
-
-#| (actual-value |#
-#|   '(foo ((lambda (a) (print "foo") a) 1) |#
-#|         ((lambda (b) (print "bar") b) 2) |#
-#|         ((lambda (c) (print "baz") c) 3) |#
-#|         ((lambda (d) (print "dog") d) 4) |#
-#|         ((lambda (d) (print "cat") d) 5)) |#
-#|   the-global-environment) |#
-
-#| (actual-value |#
-#|   '(map car '(1 1) '(2 2) '(3 3)) |#
-#|   the-global-environment) |#
-
-#| (actual-value |#
-#|   '(let* ((foo 1) |#
-#|           (foo 2) |#
-#|           (foo 3)) |#
-#|      (scope-search foo 2)) |#
-#|   the-global-environment) |#
-
-#| (actual-value |#
-#|   '(stream-cadr integers) |#
-#|   the-global-environment) |#
-
-(eval-print-exprs
-'(
-  #| (define foo "global") |#
-  #| (define (a) |#
-  #|   (let ((foo "a")) |#
-  #|     (b) |#
-  #|     '--)) |#
-  #| (define ((b mu)) |#
-  #|   (define (d) |#
-  #|     (let ((foo "d")) |#
-  #|       ((lambda () (print "λ" (scope-search foo 1)) '--)))) |#
-  #|   (let ((foo "b")) |#
-  #|     (c) |#
-  #|     (d) |#
-  #|     '--)) |#
-  #| (define ((c mu)) |#
-  #|   (print "μ" (scope-search foo 2)) '--) |#
-  #| (a) |#
-  #||#
-  #| (cdr evens) |#
-  #| (stream-ref evens 40) |#
-
-  (define (cat a : (b prom))
-    (print (force (car b))))
-  (cat "a" "b" "c")
-))
-
-#| (driver-loop) |#
+(driver-loop)
 

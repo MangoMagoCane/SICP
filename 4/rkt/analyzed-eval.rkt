@@ -29,84 +29,101 @@
             exps)
   (newline))
 
-(define (eval exp env)
-  (cond ((self-evaluating? exp) exp)
-        ((variable? exp) (lookup-variable-value exp env))
-        ((quoted? exp) (text-of-quotation exp))
-        ((assignment? exp) (eval-assignment exp env))
-        ((definition? exp) (eval-definition exp env))
-        ((if? exp) (eval-if exp env))
-        ((and? exp) (eval-and exp env))
-        ((or? exp) (eval-or exp env))
-        ((lambda? exp) (make-procedure (lambda-parameters exp)
-                                       (lambda-body exp)
-                                       env))
-        ((begin? exp)
-          (eval-sequence (begin-actions exp) env))
-        ((cond? exp) (eval (cond->if exp) env))
-        ((let? exp) (eval (let->combination exp) env))
-        ((let*? exp) (eval (let*->combination exp) env))
-        ((for? exp) (eval (for->combination exp) env))
-        ((application? exp)
-          (meta-apply (actual-value (operator exp) env)
-                      (operands exp)
-                      env))
-        (else
-          (error "Unknown expression type: EVAL" exp))))
+(define (eval exp env) ((analyze exp) env))
 
-(define (meta-apply procedure arguments env)
-  (cond ((primitive-procedure? procedure)
-          (apply-primitive-procedure
-            procedure
-            (list-of-arg-values arguments env)))
-        ((compound-procedure? procedure)
-          (eval-sequence
-            (procedure-body procedure)
+(define (analyze exp)
+ (cond
+    ((self-evaluating? exp) (analyze-self-evaluating exp))
+    ((quoted? exp) (analyze-quoted exp))
+    ((variable? exp) (analyze-variable exp))
+    ((assignment? exp) (analyze-assignment exp))
+    ((definition? exp) (analyze-definition exp))
+    #| ((if? exp) (analyze-if exp env)) |#
+    #| ((and? exp) (eval-and exp env)) |#
+    #| ((or? exp) (eval-or exp env)) |#
+    ((lambda? exp) (analyze-lambda exp))
+    ((begin? exp) (analyze-sequence (analyze-definition exp)))
+    ((cond? exp) (analyze (cond->if exp)))
+    #| ((let? exp) (eval (let->combination exp) env)) |#
+    #| ((let*? exp) (eval (let*->combination exp) env)) |#
+    #| ((for? exp) (eval (for->combination exp) env)) |#
+    ((application? exp) (analyze-application exp))
+    (else
+      (error "Unknown expression type: ANALYZE" exp))))
+
+(define (execute-application proc args)
+  (print "\n--EXECUTE-APPLICATION--")
+  (cond ((primitive-procedure? proc)
+          (print "  PROC:" proc)
+          (print "  ARGS:" args)
+          (apply-primitive-procedure proc args))
+        ((compound-procedure? proc)
+          (print "  PROC:" (list (car proc) (cadr proc) (caddr proc)))
+          (print "  ARGS:" args)
+          ((procedure-body proc) ; proc body is now a lambda?
             (extend-environment
-              (procedure-parameters procedure)
-              (process-args arguments (proc-params-var-args procedure) env)
-              (procedure-environment procedure))))
+              (procedure-parameters proc)
+              (process-args args (proc-params-var-args proc) (procedure-environment proc)) ; this might be right idfk kthxbye
+              (procedure-environment proc))))
         (else
-          (error
-            "Unknown procedure type: APPLY" procedure))))
+          (error "Unknown procedure type: EXECUTE-APPLICATION"
+                 proc))))
 
-(define (delay-it exp env)
-  (list 'thunk exp env))
-(define (delay-memo-it exp env)
-  (list 'memo-thunk exp env))
-(define (thunk? obj)
-  (tagged-list? obj 'thunk))
-(define (memo-thunk? obj)
-  (tagged-list? obj 'memo-thunk))
-(define (evaluated-memo-thunk? obj)
-  (tagged-list? obj 'evaluated-memo-thunk))
-(define (thunk-value evaluated-thunk)
-  (cadr evaluated-thunk))
-(define (thunk-exp thunk) (cadr thunk))
-(define (thunk-env thunk) (caddr thunk))
+(define (analyze-self-evaluating exp)
+  (lambda (env) exp))
+(define (analyze-quoted exp)
+  (let ((qval (text-of-quotation exp)))
+    (lambda (env) qval)))
+(define (analyze-variable exp)
+  (lambda (env) (lookup-variable-value exp env)))
+(define (analyze-assignment exp)
+  (let ((var (assignment-value exp))
+        (vproc (analyze (definition-value exp))))
+    (lambda (env)
+      (set-variable-value! var (vproc env) env)
+      'ok)))
+(define (analyze-definition exp)
+  (let ((var (definition-variable exp))
+        (vproc (analyze (definition-value exp))))
+    (lambda (env)
+      (define-variable! var (vproc env) env)
+      'ok)))
+(define (analyze-if exp)
+  (let ((pproc (analyze (if-predicate exp)))
+        (cproc (analyze (if-consequent exp)))
+        (aproc (analyze (if-alternative exp))))
+    (lambda (env) (if (true? (pproc env))
+                      (cproc env)
+                      (aproc env)))))
+(define (analyze-lambda exp)
+  (let ((vars (lambda-parameters exp))
+        (bproc (analyze-sequence (lambda-body exp))))
+    #| (print "\n--ANALYZE-LAMBDA--") |#
+    #| (print "  VARS:" vars) |#
+    (print "  LAMBDA-BODY" (lambda-body exp))
+    (lambda (env) (append (make-procedure vars bproc env) (lambda-body exp)))))
+(define (analyze-sequence exps)
+  (define (sequentially proc1 proc2)
+    (lambda (env) (proc1 env) (proc2 env)))
+  (define (loop first-proc rest-procs)
+    (if (null? rest-procs)
+        first-proc
+        (loop (sequentially first-proc (car rest-procs))
+              (cdr rest-procs))))
+  (let ((procs (map analyze exps)))
+    (if (null? procs) (error "Empty sequence: ANALYZE"))
+    (loop (car procs) (cdr procs))))
 
-(define (actual-value exp env)
-  (force-it (eval exp env)))
-(define (force-it obj)
-  (cond ((thunk? obj)
-          (actual-value (thunk-exp obj) (thunk-env obj)))
-        ((memo-thunk? obj)
-          (let ((result (actual-value (thunk-exp obj)
-                                      (thunk-env obj))))
-            (set-car! obj 'evaluated-memo-thunk)
-            (set-car! (cdr obj)
-                      result) ; replace exp with its value
-            (set-cdr! (cdr obj)
-                      '()) ; forget unneeded env
-            result))
-        ((evaluated-memo-thunk? obj) (thunk-value obj))
-        (else obj)))
+(define (analyze-application exp)
+  (let ((fproc (analyze (operator exp)))
+        (aprocs (map analyze (operands exp))))
+    (lambda (env)
+      (execute-application
+        (fproc env)
+        (map (lambda (aproc) (aproc env))
+             aprocs)))))
 
-(define (variable-args? arg-list) (tagged-list? arg-list ':))
-(define (lazy-param? param)
-  (and (pair? param) (eq? (cadr param) 'lazy)))
-(define (lazy-memo-param? param)
-  (and (pair? param) (eq? (cadr param) 'memo)))
+(define (variable-args? param-list) (tagged-list? param-list ':))
 (define (first-param param-list) (car param-list))
 (define (rest-params param-list) (cdr param-list))
 (define (first-arg arg-list) (car arg-list))
@@ -120,23 +137,23 @@
                  '()
                  (rest-params params))))
         (if (variable-args? params)
-            (list (cons (actual-value (first-arg args) env)
+            (list (cons (eval (first-arg args) env)
                         (process-args (rest-args args) new-params env)))
             (let ((proc
                     (if (and (not (null? params)) (pair? (first-param params)))
                         (let ((param (first-param params)))
-                          (cond ((lazy-param? param)  delay-it)
+                          (cond ((lazy-param? param) delay-it)
                                 ((lazy-memo-param? param) delay-memo-it)
                                 (else (error "Invalid param setting" param))))
                         actual-value)))
               (cons (proc (first-arg args) env)
                     (process-args (rest-args args) new-params env)))))))
 
-(define (list-of-values exps env)
-  (if (no-operands? exps)
-      '()
-      (cons (eval (first-operand exps) env)
-            (list-of-values (rest-operands exps) env))))
+#| (define (list-of-values exps env) |#
+#|   (if (no-operands? exps) |#
+#|       '() |#
+#|       (cons (eval (first-operand exps) env) |#
+#|             (list-of-values (rest-operands exps) env)))) |#
 (define (list-of-arg-values exps env)
   (if (no-operands? exps)
       '()
@@ -186,6 +203,7 @@
   (if (pair? exp)
       (inner exp)
       #f))
+
 
 (define (assignment? exp) (tagged-list? exp 'set!))
 (define (assignment-variable exp) (cadr exp))
@@ -450,7 +468,15 @@
 (define (false? x) (eq? x #f))
 
 (define (make-procedure parameters body env)
-  (list 'procedure parameters (scan-out-defines-simultaneous body) env))
+  (let ((new-body
+         (if (pair? body)
+             (scan-out-defines-simultaneous body)
+             body)))
+    #| (print "--MAKE-PROC--") |#
+    #| (print "  PARAMS:" parameters) |#
+    #| (print "  NEW-BODY:" new-body) |#
+    (list 'procedure parameters new-body env)))
+    
 (define (compound-procedure? p)
   (tagged-list? p 'procedure))
 (define (proc-params-var-args p) (cadr p))
@@ -555,8 +581,8 @@
         (list 'eq? eq?)
         (list 'length length)
         (list 'error error)
-        (list 'eval eval)
-        (list 'apply meta-apply)
+        #| (list 'eval eval) |#
+        #| (list 'apply meta-apply) |#
         (list 'read read)
         (list '= =)
         (list '< <)
@@ -569,7 +595,7 @@
         (list 'newline newline)
         (list 'print (lambda (first . rest)
                        (if (null? rest)
-                           (print "PRINT:" first)
+                           (print "PRINT;" first)
                            (apply print (append (list "PRINT:" first) rest)))))
         (list '#t #t)
         (list '#f #f)
@@ -580,11 +606,10 @@
 (define (primitive-procedure-names)
   (map car primitive-procedures))
 (define (primitive-procedure-objects)
-  (map (lambda (proc) (list 'primitive (cadr proc)))
+  (map (lambda (proc) (list 'primitive (cadr proc) (car proc)))
        primitive-procedures))
 (define (apply-primitive-procedure proc args)
-  (apply
-    (primitive-implementation proc) args))
+  (apply (primitive-implementation proc) args))
 
 (define (setup-environment)
   (let ((initial-env
@@ -613,38 +638,52 @@
 (define (driver-loop)
   (prompt-for-input input-prompt)
   (let* ((input (read))
-         (output (actual-value input the-global-environment)))
+         (output (eval input the-global-environment)))
     (announce-output output-prompt)
     (user-print output))
   (driver-loop))
 
-(define map-proc
-  '(define (map proc : lists)
-    (define (map-1 proc lst)
-      (if (null? lst)
+(define defn-procs
+  '((define (map proc : lists)
+      (define (map-1 proc lst)
+        (if (null? lst)
+            '()
+            (cons (proc (car lst))
+                  (map-1 proc (cdr lst)))))
+      (if (null? (car lists))
           '()
-          (cons (proc (car lst))
-                (map-1 proc (cdr lst)))))
-    (if (null? (car lists))
-        '()
-        (cons
-          (apply proc (map-1 car lists))
-          (apply map
-                 (cons proc (map-1 cdr lists)))))))
-(eval map-proc the-global-environment)
+          (cons
+            (apply proc (map-1 car lists))
+            (apply map
+                  (cons proc (map-1 cdr lists))))))))
+(for-each (lambda (exp) (eval exp the-global-environment))
+          defn-procs)
 
-(print "----------------------------------------------")
+#| (actual-value |#
+#|   #| '(define (foo a (b lazy) (c memo)) |# |#
+#|   '(define (foo a b c) |#
+#|      (+ a a b b c c c c) |#
+#|      (print c) |#
+#|      c) |#
+#|   the-global-environment) |#
 
-(actual-value
-  '(define (foo a (b lazy) (c memo))
-     (+ a a b b c c c c) (print c) c)
-  the-global-environment)
+#| (actual-value |#
+#|   '(define (bar a b)) |#
+#|      (print a) |#
+#|      (print b)) |#
+#|   the-global-environment) |#
 
-(actual-value
-  '(foo ((lambda () (print "foo") 1))
-        ((lambda () (print "bar") 2))
-        ((lambda () (print "baz") 3)))
-  the-global-environment)
+#| (actual-value |#
+#|   '(bar 1 (+ 2 3)) |#
+#|   the-global-environment) |#
 
-(driver-loop)
+#| (actual-value |#
+#|   '(foo ((lambda () (print "foo") 1)) |#
+#|         ((lambda () (print "bar") 2)) |#
+#|         ((lambda () (print "baz") 3))) |#
+#|   the-global-environment) |#
+
+
+
+#| (driver-loop) |#
 
