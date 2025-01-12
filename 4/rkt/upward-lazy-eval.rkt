@@ -201,11 +201,10 @@
       (inner exp)
       #f))
 
-(define (promise-tag promise) (car promise))
-(define (promise-exp promise) (cadr promise))
-(define (promise-env promise) (caddr promise))
-(define (promise-value evaluated-promise)
-  (cadr evaluated-promise))
+(define promise-tag car) ; promise
+(define promise-exp cadr) ; promise
+(define promise-env caddr) ; promise
+(define promise-value cadr) ; evaluated-promise
 (define (delay? exp) (tagged-list? exp 'delay))
 (define (promise? exp) (tagged-list? exp 'promise))
 (define (evaluated-promise? exp) (tagged-list? exp 'evaluated-promise))
@@ -227,8 +226,8 @@
           (else (error "Invalid promise type: EVAL-FORCE" exp obj)))))
 
 (define (assignment? exp) (tagged-list? exp 'set!))
-(define (assignment-variable exp) (cadr exp))
-(define (assignment-value exp) (caddr exp))
+(define assignment-variable cadr) ; exp
+(define assignment-value caddr) ; exp
 (define (definition? exp) (tagged-list? exp 'define))
 (define (make-definition definition body)
   (list 'define definition body))
@@ -248,8 +247,8 @@
           (make-lambda (cdadr exp) ; formal parameters
                        (cddr exp))))) ; body
 
-(define (defn-clause-var clause) (car clause))
-(define (defn-clause-exp clause) (cadr clause))
+(define defn-clause-var car) ; clause
+(define defn-clause-exp cadr) ; clause
 
 (define (scan-out-defines body proc)
   (define (scan exps defns)
@@ -321,16 +320,16 @@
 
 (define (lambda? exp) (tagged-list? exp 'lambda))
 (define (mu? exp) (tagged-list? exp 'mu))
-(define (lambda/mu-params exp) (cadr exp))
-(define (lambda/mu-body exp) (cddr exp))
+(define lambda/mu-params cadr) ; exp
+(define lambda/mu-body cddr) ; exp
 (define (make-lambda parameters body)
   (cons 'lambda (cons parameters body)))
 (define (make-mu parameters body)
   (cons 'mu (cons parameters body)))
 
 (define (if? exp) (tagged-list? exp 'if))
-(define (if-predicate exp) (cadr exp))
-(define (if-consequent exp) (caddr exp))
+(define if-predicate cadr) ; exp
+(define if-consequent caddr) ; exp
 (define (if-alternative exp)
   (if (not (null? (cdddr exp)))
       (cadddr exp)
@@ -339,10 +338,10 @@
   (list 'if predicate consequent alternative))
 
 (define (begin? exp) (tagged-list? exp 'begin))
-(define (begin-actions exp) (cdr exp))
+(define begin-actions cdr) ; exp
 (define (last-exp? seq) (null? (cdr seq)))
-(define (first-exp seq) (car seq))
-(define (rest-exps seq) (cdr seq))
+(define first-exp car) ; seq
+(define rest-exps cdr) ; seq
 (define (sequence->exp seq)
   (cond ((null? seq) seq)
         ((last-exp? seq) (first-exp seq))
@@ -350,21 +349,21 @@
 (define (make-begin seq) (cons 'begin seq))
 
 (define (application? exp) (pair? exp))
-(define (operator exp) (car exp))
-(define (operands exp) (cdr exp))
+(define operator car) ; exp
+(define operands cdr) ; exp
 (define (no-operands? ops) (null? ops))
-(define (first-operand ops) (car ops))
-(define (rest-operands ops) (cdr ops))
+(define first-operand car) ; ops
+(define rest-operands cdr) ; ops
 
 (define (cond? exp) (tagged-list? exp 'cond))
-(define (cond-clauses exp) (cdr exp))
+(define cond-clauses cdr) ; exp
 (define (cond-else-clause? clause)
   (eq? (cond-predicate clause) 'else))
-(define (cond-predicate clause) (car clause))
-(define (cond-actions clause) (cdr clause))
+(define cond-predicate car) ; clause
+(define cond-actions cdr) ; clause
 (define (make-application procedure parameters)
   (cons procedure parameters))
-(define (cond-arrow-action clause) (caddr clause))
+(define cond-arrow-action caddr) ; clause
 (define (cond-arrow-clause? clause)
   (tagged-list? (cond-actions clause) '=>))
 
@@ -398,13 +397,13 @@
   (cons 'let (list var bindings body))) ; DEF WRONG
 (define (let? exp) (tagged-list? exp 'let))
 (define (named-let? exp) (not (pair? (named-let-var exp))))
-(define (let-clauses exp) (cadr exp))
-(define (let-body exp) (cddr exp))
-(define (let-var clause) (car clause))
-(define (let-exp clause) (cadr clause))
-(define (named-let-var exp) (cadr exp))
-(define (named-let-bindings exp) (caddr exp))
-(define (named-let-body exp) (cadddr exp))
+(define let-clauses cadr) ; exp
+(define let-body cddr) ; exp
+(define let-var car) ; clause
+(define let-exp cadr) ; clause
+(define named-let-var cadr) ; exp
+(define named-let-bindings caddr) ; exp
+(define named-let-body cadddr) ; exp
 
 (define (eval-let exp env)
   (define (expand-clauses clauses vars exps)
@@ -439,8 +438,8 @@
 (define (make-let* clauses body)
   (list 'let* clauses body)) ; P{ROBABLY} WRONBG
 (define (let*? exp) (tagged-list? exp 'let*))
-(define (let*-clauses exp) (cadr exp))
-(define (let*-body exp) (caddr exp))
+(define let*-clauses cadr) ; exp
+(define let*-body caddr) ; exp
 
 (define (eval-let* exp env)
   (define (expand-clauses clauses)
@@ -476,10 +475,10 @@
   (inner (rest-exps exps)))
 
 (define (for? exp) (tagged-list? exp 'for))
-(define (for-initialize exp) (cadr exp))
-(define (for-predicate exp) (caddr exp))
-(define (for-increment exp) (cadddr exp))
-(define (for-body exp) (cddddr exp))
+(define for-initialize cadr) ; exp
+(define for-predicate caddr) ; exp
+(define for-increment cadddr) ; exp
+(define for-body cddddr) ; exp
 
 (define (eval-for exp env)
   (eval
@@ -498,8 +497,8 @@
     env))
 
 (define (scope-search? exp) (tagged-list? exp 'scope-search))
-(define (scope-search-var exp) (cadr exp))
-(define (scope-search-count exp) (caddr exp))
+(define scope-search-var cadr) ; exp
+(define scope-search-count caddr) ; exp
 
 (define (eval-scope-search exp env)
   (define (iter-envs count env)
@@ -540,13 +539,13 @@
 (define (procedure-body proc) (cadddr proc))
 (define (proc-env proc) (car (cddddr proc)))
 
-(define (enclosing-environment env) (cdr env))
-(define (first-frame env) (car env))
+(define enclosing-environment cdr) ; env
+(define first-frame car) ; env
 (define the-empty-environment '())
 (define (make-frame variables values)
   (cons variables values))
-(define (frame-variables frame) (car frame))
-(define (frame-values frame) (cdr frame))
+(define frame-variables car) ; frame
+(define frame-values cdr) ; frame
 (define (add-binding-to-frame! var val frame)
   (set-car! frame (cons var (car frame)))
   (set-cdr! frame (cons val (cdr frame))))
@@ -603,7 +602,7 @@
 
 (define (primitive-procedure? proc)
   (tagged-list? proc 'primitive))
-(define (primitive-implementation proc) (cadr proc))
+(define primitive-implementation cadr) ; proc
 
 (define primitive-procedures
   (list (list 'car car)
@@ -724,7 +723,7 @@
 
   (define (cons-stream x (y promise))
     (cons x y))
-  (define (stream-car z) (car z))
+  (define stream-car car) ; z
   (define (stream-cdr z) (force (cdr z)))
   (define (stream-cadr z) (stream-car (stream-cdr z)))
   (define (integers-starting-from n)
@@ -782,29 +781,33 @@
 
 (eval-print-exprs
 '(
-  #| (define foo "global") |#
-  #| (define (a) |#
-  #|   (let ((foo "a")) |#
-  #|     (b) |#
-  #|     '--)) |#
-  #| (define ((b mu)) |#
-  #|   (define (d) |#
-  #|     (let ((foo "d")) |#
-  #|       ((lambda () (print "λ" (scope-search foo 1)) '--)))) |#
-  #|   (let ((foo "b")) |#
-  #|     (c) |#
-  #|     (d) |#
-  #|     '--)) |#
-  #| (define ((c mu)) |#
-  #|   (print "μ" (scope-search foo 2)) '--) |#
-  #| (a) |#
-  #||#
+  (define foo "global")
+  (define (a)
+    (let ((foo "a"))
+      (b)
+      '--))
+  (define ((b mu))
+    (define (d)
+      (let ((foo "d"))
+        (print "λ" (scope-search foo 4))
+        '--))
+    (let ((foo "b"))
+      (c)
+      (d)
+      '--))
+  (define ((c mu))
+    (let ((foo "c"))
+      (print "μ" (scope-search foo 3))
+      '--))
+  (a)
+
   #| (cdr evens) |#
   #| (stream-ref evens 40) |#
-
-  (define (cat a : (b prom))
-    (print (force (car b))))
-  (cat "a" "b" "c")
+  #||#
+  #| (define (cat a : (b prom)) |#
+  #|   (force (cdr b))) |#
+  #| 'foo |#
+  #| (cat "a" "b" "c") |#
 ))
 
 #| (driver-loop) |#
